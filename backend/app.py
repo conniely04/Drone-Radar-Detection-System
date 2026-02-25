@@ -1,6 +1,6 @@
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
-import cv2
+# import cv2
 import json
 import threading
 import time
@@ -10,6 +10,7 @@ import serial.tools.list_ports
 import queue
 import logging
 from collections import deque
+import sys
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -25,6 +26,7 @@ class ObjectDetectionSystem:
         self.detection_data = deque(maxlen=100)  # Store last 100 detections
         self.is_running = False
         self.data_queue = queue.Queue()
+        self.raw_sensor_data = deque(maxlen=1000)  # Store raw serial data
         
         # Camera settings
         self.camera_width = 640
@@ -60,6 +62,15 @@ class ObjectDetectionSystem:
     def initialize_serial(self, port=None):
         """Initialize serial connection for radar sensor"""
         try:
+            # Close any existing connection first
+            if self.serial_connection:
+                try:
+                    self.serial_connection.close()
+                    logger.info("Closed existing serial connection")
+                except:
+                    pass
+                self.serial_connection = None
+            
             if port is None:
                 # Auto-detect serial ports
                 ports = serial.tools.list_ports.comports()
@@ -71,6 +82,8 @@ class ObjectDetectionSystem:
                 else:
                     logger.warning("No serial ports found")
                     return False
+            
+            logger.info(f"Attempting to connect to {port}...")
             
             self.serial_connection = serial.Serial(
                 port=port,
@@ -85,8 +98,17 @@ class ObjectDetectionSystem:
             logger.info(f"Serial connection established on {port}")
             return True
             
+        except PermissionError as e:
+            error_msg = f"Permission denied for {port}. Try: sudo chmod 666 {port}"
+            logger.error(f"Serial initialization error: {error_msg}")
+            return False
+        except serial.SerialException as e:
+            error_msg = f"Serial port error: {str(e)}"
+            logger.error(f"Serial initialization error: {error_msg}")
+            return False
         except Exception as e:
-            logger.error(f"Serial initialization error: {e}")
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(f"Serial initialization error: {error_msg}")
             return False
     
     def generate_camera_frames(self):
@@ -120,16 +142,27 @@ class ObjectDetectionSystem:
             try:
                 if self.serial_connection.in_waiting > 0:
                     # Read line from serial
-                    line = self.serial_connection.readline().decode('utf-8').strip()
+                    try:
+                        line = self.serial_connection.readline().decode('utf-8').strip()
+                    except:
+                        line = self.serial_connection.readline().decode('latin-1').strip()
                     
                     if line:
+                        # Store raw data
+                        raw_entry = {
+                            'timestamp': datetime.now().isoformat(),
+                            'raw_data': line
+                        }
+                        self.raw_sensor_data.appendleft(raw_entry)
+                        logger.info(f"Raw sensor data: {line}")
+                        
                         # Parse sensor data (adjust format based on your sensor)
                         # Expected format: "SPEED:45,DISTANCE:30,CONFIDENCE:0.95"
                         data = self.parse_sensor_data(line)
                         if data:
                             self.add_detection(data)
                 
-                time.sleep(0.1)  # Small delay to prevent CPU overload
+                time.sleep(0.05)  # Small delay to prevent CPU overload
                 
             except Exception as e:
                 logger.error(f"Sensor reading error: {e}")
@@ -138,7 +171,7 @@ class ObjectDetectionSystem:
     def parse_sensor_data(self, data_string):
         """Parse incoming sensor data string"""
         try:
-            # Example parsing - adjust based on your radar sensor format
+            # Parse comma-separated key:value pairs
             parts = data_string.split(',')
             data = {}
             
@@ -153,16 +186,22 @@ class ObjectDetectionSystem:
                         data['distance'] = float(value)
                     elif key == 'CONFIDENCE':
                         data['confidence'] = float(value)
+                    elif key == 'DETECTEDOBJECTVELOCITY':
+                        data['velocity'] = float(value)
             
-            # Validate data
-            if 'speed' in data and 'distance' in data:
+            # Only process data if DetectedObjectVelocity is present
+            if 'velocity' in data:
+                logger.info(f"Valid detection: Velocity={data['velocity']}")
                 return {
-                    'speed': data['speed'],
-                    'distance': data['distance'],
+                    'speed': data.get('speed'),
+                    'distance': data.get('distance'),
                     'confidence': data.get('confidence', 0.9),
+                    'velocity': data['velocity'],
                     'object_type': 'Vehicle',
                     'timestamp': datetime.now().isoformat()
                 }
+            else:
+                logger.debug(f"Ignoring data without DetectedObjectVelocity: {data_string}")
                 
         except Exception as e:
             logger.error(f"Data parsing error: {e}")
@@ -295,13 +334,104 @@ def test_sensor_data():
     detection_system.add_detection(test_data)
     return jsonify(test_data)
 
+@app.route('/api/sensor/raw')
+def get_raw_sensor_data():
+    """Get raw serial sensor data (most recent readings)"""
+    raw_data = list(detection_system.raw_sensor_data)
+    return jsonify({
+        'raw_data': raw_data,
+        'count': len(raw_data),
+        'latest': raw_data[0] if raw_data else None
+    })
+
+@app.route('/api/sensor/stream')
+def sensor_stream():
+    """Stream raw sensor data to frontend via Server-Sent Events"""
+    def generate():
+        last_count = 0
+        while detection_system.is_running:
+            try:
+                current_count = len(detection_system.raw_sensor_data)
+                if current_count > last_count:
+                    # New data available
+                    raw_data = list(detection_system.raw_sensor_data)
+                    new_items = raw_data[:current_count - last_count]
+                    for item in reversed(new_items):  # Reverse to get chronological order
+                        yield f"data: {json.dumps(item)}\n\n"
+                    last_count = current_count
+                
+                time.sleep(0.1)
+            except Exception as e:
+                logger.error(f"Stream error: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/system/port-info', methods=['POST'])
+def set_serial_port():
+    """Set the serial port to use"""
+    try:
+        data = request.json
+        port = data.get('port')
+        
+        if not port:
+            return jsonify({'error': 'Port not specified'}), 400
+        
+        logger.info(f"Attempting to connect to port: {port}")
+        
+        # Stop existing connection
+        if detection_system.is_running:
+            logger.info("Stopping existing system...")
+            detection_system.stop_system()
+        
+        # Try to initialize with new port
+        if detection_system.initialize_serial(port):
+            detection_system.is_running = True
+            # Start sensor reading thread
+            sensor_thread = threading.Thread(target=detection_system.read_sensor_data)
+            sensor_thread.daemon = True
+            sensor_thread.start()
+            
+            logger.info(f"Successfully connected to {port}")
+            return jsonify({
+                'message': f'Serial port {port} connected',
+                'port': port,
+                'status': 'connected'
+            })
+        else:
+            error_msg = f"Failed to connect to {port}. Check if port is in use or try: sudo chmod 666 {port}"
+            logger.error(error_msg)
+            return jsonify({'error': error_msg}), 500
+            
+    except Exception as e:
+        error_msg = f"Connection error: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/system/available-ports')
+def get_available_ports():
+    """Get list of available serial ports"""
+    try:
+        ports = serial.tools.list_ports.comports()
+        available_ports = [
+            {
+                'device': port.device,
+                'description': port.description,
+                'manufacturer': port.manufacturer
+            }
+            for port in ports
+        ]
+        return jsonify({'ports': available_ports})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Start the detection system
     detection_system.start_system()
     
     try:
         # Run Flask app
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+        app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
     finally:
         # Clean up on exit
         detection_system.stop_system()
