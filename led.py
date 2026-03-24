@@ -3,13 +3,13 @@ import json
 from gpiozero import LED
 from time import sleep
 
-# 1. Setup LEDs (BCM Pins 17, 27, 22)
+# Setup LEDs (Pins 17, 27, 22)
 red = LED(17)
 yellow = LED(27)
 green = LED(22)
 leds = [red, yellow, green]
 
-# 2. Setup Serial Communication
+# Setup Serial Communication
 # Usually /dev/ttyACM0 for USB radar sensors on Pi
 SERIAL_PORT = '/dev/ttyACM0' 
 BAUD_RATE = 115200
@@ -19,9 +19,9 @@ def update_leds(distance):
     for led in leds:
         led.off()
 
-    # Threshold Logic (Adjust these cm values for your specific environment)
+    # Threshold Logic 
     if distance <= 25.0:
-        yellow.on()   # Caution Zone (e.g., 5 meters/units)
+        yellow.on()   # Caution Zone
     if distance <= 10.0:
         red.on()      # Danger/Stop Zone
     else: 
@@ -29,11 +29,11 @@ def update_leds(distance):
     
     print(f"Current Distance: {distance}")
 
-# --- Main Execution ---
+# Main Execution
 try:
     # Initialize Serial connection
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    print(f"Listening to Radar on {SERIAL_PORT}...")
+    print(f"From Radar Sensor on {SERIAL_PORT}...")
 
     while True:
         if ser.in_waiting > 0:
@@ -44,7 +44,7 @@ try:
                 # Parse JSON data (Standard OPS242 format)
                 data = json.loads(line)
                 
-                # Extract distance - 'dist' is the typical key for OPS242
+                # Extract distance 
                 if 'dist' in data:
                     current_dist = float(data['dist'])
                     update_leds(current_dist)
