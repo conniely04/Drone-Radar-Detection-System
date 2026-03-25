@@ -143,3 +143,168 @@
   font-family: monospace;
   margin-left: 5px;
 }
+/* Serial Port Selector Styles */
+.serial-port-selector {
+  margin-top: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 15px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.serial-port-selector h3 {
+  margin: 0 0 12px 0;
+  color: white;
+  font-size: 1em;
+  font-weight: 500;
+}
+
+.port-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.port-controls select,
+.port-controls button {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.port-controls select {
+  flex: 1;
+  min-width: 200px;
+}
+
+.port-controls select:hover,
+.port-controls select:focus {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  outline: none;
+}
+
+.port-controls button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.port-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.port-connected {
+  margin-top: 10px;
+  color: rgba(76, 200, 80, 0.9);
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+/* Sensor Data Section Styles */
+.sensor-data-section {
+  margin-top: 30px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.sensor-data-section h2 {
+  margin: 0 0 15px 0;
+  color: white;
+  font-size: 1.4em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+}
+
+.toggle-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: all 0.3s ease;
+}
+
+.toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.sensor-data-container {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sensor-data-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sensor-data-item {
+  background: rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(100, 200, 255, 0.6);
+  padding: 10px 12px;
+  border-radius: 5px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  font-family: "Courier New", monospace;
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sensor-data-item .timestamp {
+  color: rgba(150, 200, 255, 0.8);
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.sensor-data-item .raw-data {
+  color: rgba(200, 255, 200, 0.8);
+  flex: 1;
+  word-break: break-all;
+}
+
+.no-data {
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  padding: 30px 0;
+  font-style: italic;
+}
+
+/* Scrollbar Styling */
+.sensor-data-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sensor-data-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.sensor-data-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+}
+
+.sensor-data-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

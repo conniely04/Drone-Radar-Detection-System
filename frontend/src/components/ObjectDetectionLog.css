@@ -115,6 +115,11 @@
   font-size: 1.4em;
 }
 
+.detail-item .value.direction {
+  color: #90ee90;
+  font-size: 1.1em;
+}
+
 /* Detection History */
 .detection-history {
   margin-top: 20px;
@@ -175,13 +180,18 @@
   color: #28a745;
 }
 
-.history-row .type {
+.history-row .direction {
   color: #6f42c1;
 }
 
-.history-row .confidence {
+.history-row .unit {
   color: #fd7e14;
   font-weight: 500;
+}
+
+.history-rows {
+  max-height: 320px; /* approx 5 rows */
+  overflow-y: auto;
 }
 
 .no-data {
