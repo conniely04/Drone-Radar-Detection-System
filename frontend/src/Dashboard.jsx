@@ -22,28 +22,7 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Stream raw sensor data
-  useEffect(() => {
-    if (!backendStatus || !backendStatus.sensor_available) return;
-
-    const eventSource = new EventSource(`${backendUrl}/api/sensor/stream`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setRawSensorData((prev) => [data, ...prev.slice(0, 49)]); // Keep last 50
-      } catch (e) {
-        console.error("Error parsing stream data:", e);
-      }
-    };
-
-    eventSource.onerror = () => {
-      console.error("Stream connection error");
-      eventSource.close();
-    };
-
-    return () => eventSource.close();
-  }, [backendStatus, backendUrl]);
+  // (Raw sensor panel removed) -- raw data still collected by backend but not shown here
 
   const checkBackendConnection = async () => {
     try {
@@ -113,7 +92,10 @@ const Dashboard = () => {
             </div>
           ) : backendStatus ? (
             <div className="status-success">
-              ✅ Backend connected - {backendStatus.message}
+              ✅{" "}
+              {backendStatus.sensor_connected
+                ? "Serial port connected successfully"
+                : "Data is being detected!"}
             </div>
           ) : (
             <div className="status-loading">
@@ -166,42 +148,7 @@ const Dashboard = () => {
           </section>
         </div>
 
-        {/* Raw Sensor Data Section */}
-        {backendStatus && (
-          <section className="sensor-data-section">
-            <h2>
-              Raw Sensor Data
-              <button
-                className="toggle-btn"
-                onClick={() => setShowRawData(!showRawData)}
-              >
-                {showRawData ? "▼" : "▶"}
-              </button>
-            </h2>
-
-            {showRawData && (
-              <div className="sensor-data-container">
-                {rawSensorData.length === 0 ? (
-                  <p className="no-data">
-                    No sensor data yet. Connect a serial device and data will
-                    appear here.
-                  </p>
-                ) : (
-                  <div className="sensor-data-list">
-                    {rawSensorData.map((item, index) => (
-                      <div key={index} className="sensor-data-item">
-                        <span className="timestamp">
-                          {new Date(item.timestamp).toLocaleTimeString()}
-                        </span>
-                        <span className="raw-data">{item.raw_data}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
+        {/* Raw sensor panel removed per user request */}
       </main>
 
       <footer className="dashboard-footer">

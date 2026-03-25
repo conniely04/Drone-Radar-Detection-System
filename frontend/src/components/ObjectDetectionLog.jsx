@@ -30,24 +30,7 @@ const ObjectDetectionLog = () => {
     }
   };
 
-  // Add test detection via backend API
-  const addTestDetection = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/api/sensor/test`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to add test detection");
-      }
-
-      // Refresh the detections after adding test data
-      await fetchDetections();
-    } catch (err) {
-      console.error("Error adding test detection:", err);
-      setError(err.message);
-    }
-  };
+  // (Removed) test detection endpoint - no fake data generation
 
   // Fetch real detection data and set up polling
   useEffect(() => {
@@ -60,9 +43,7 @@ const ObjectDetectionLog = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const addManualDetection = async () => {
-    await addTestDetection();
-  };
+  // Manual detection generation removed
 
   const formatTimestamp = (timestamp) => {
     try {
@@ -77,13 +58,6 @@ const ObjectDetectionLog = () => {
       <div className="detection-header">
         <h3>Object Detection Log</h3>
         <div className="controls">
-          <button
-            onClick={addManualDetection}
-            className="simulate-btn"
-            disabled={isLoading}
-          >
-            {isLoading ? "Adding..." : "Add Test Detection"}
-          </button>
           <button
             onClick={fetchDetections}
             className="refresh-btn"
@@ -115,11 +89,19 @@ const ObjectDetectionLog = () => {
           <div className="detection-details">
             <div className="detail-item">
               <span className="label">Captured Speed:</span>
-              <span className="value speed">{latestDetection.speed} mph</span>
+              <span className="value speed">
+                {Math.abs(Number(latestDetection.speed)).toFixed(2)}
+              </span>
             </div>
             <div className="detail-item">
               <span className="label">Position:</span>
-              <span className="value">{latestDetection.distance} ft away</span>
+              <span className="value">
+                {latestDetection.computed_distance != null
+                  ? `${latestDetection.computed_distance.toFixed(2)} ${latestDetection.computed_distance_unit || latestDetection.unit}`
+                  : latestDetection.distance != null
+                    ? `${latestDetection.distance}`
+                    : "—"}
+              </span>
             </div>
             <div className="detail-item">
               <span className="label">Timestamp:</span>
@@ -128,13 +110,17 @@ const ObjectDetectionLog = () => {
               </span>
             </div>
             <div className="detail-item">
-              <span className="label">Object Type:</span>
-              <span className="value">{latestDetection.object_type}</span>
+              <span className="label">Unit:</span>
+              <span className="value">{latestDetection.unit || "—"}</span>
             </div>
             <div className="detail-item">
-              <span className="label">Confidence:</span>
-              <span className="value">
-                {(latestDetection.confidence * 100).toFixed(0)}%
+              <span className="label">Direction:</span>
+              <span className="value direction">
+                {Number(latestDetection.speed) < 0
+                  ? "Inbound"
+                  : Number(latestDetection.speed) > 0
+                    ? "Outbound"
+                    : "—"}
               </span>
             </div>
           </div>
@@ -149,32 +135,38 @@ const ObjectDetectionLog = () => {
             <span>Time</span>
             <span>Speed</span>
             <span>Distance</span>
-            <span>Type</span>
-            <span>Confidence</span>
+            <span>Direction</span>
+            <span>Unit</span>
           </div>
           {detectionData.length === 0 && !isLoading ? (
-            <div className="no-data">
-              No detections yet...
-              <br />
-              <small>Click "Add Test Detection" to generate sample data</small>
-            </div>
+            <div className="no-data">No detections yet...</div>
           ) : (
-            detectionData
-              .slice()
-              .reverse()
-              .map((detection) => (
-                <div key={detection.id} className="history-row">
-                  <span className="time">
-                    {formatTimestamp(detection.timestamp)}
-                  </span>
-                  <span className="speed">{detection.speed} mph</span>
-                  <span className="distance">{detection.distance} ft</span>
-                  <span className="type">{detection.object_type}</span>
-                  <span className="confidence">
-                    {(detection.confidence * 100).toFixed(0)}%
-                  </span>
-                </div>
-              ))
+            <div className="history-rows">
+              {detectionData.slice().map((detection) => {
+                const speedNum = Number(detection.speed) || 0;
+                const direction =
+                  speedNum < 0 ? "Inbound" : speedNum > 0 ? "Outbound" : "—";
+                return (
+                  <div key={detection.id} className="history-row">
+                    <span className="time">
+                      {formatTimestamp(detection.timestamp)}
+                    </span>
+                    <span className="speed">
+                      {Math.abs(Number(detection.speed)).toFixed(2)}
+                    </span>
+                    <span className="distance">
+                      {detection.computed_distance != null
+                        ? `${detection.computed_distance.toFixed(2)} ${detection.computed_distance_unit || detection.unit || ""}`
+                        : detection.distance != null
+                          ? detection.distance
+                          : "—"}
+                    </span>
+                    <span className="direction">{direction}</span>
+                    <span className="unit">{detection.unit || "—"}</span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
