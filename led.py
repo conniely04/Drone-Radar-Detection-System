@@ -1,60 +1,75 @@
 import serial
 import json
+import time
 from gpiozero import LED
-from time import sleep
 
-# Setup LEDs (Pins 17, 27, 22)
-red = LED(17)
-yellow = LED(27)
-green = LED(22)
+# --- CONFIGURATION ---
+SERIAL_PORT = '/dev/ttyACM0' 
+BAUD_RATE = 19200
+
+# Magnitude Thresholds (Adjust once the sensor is in the enclosure)
+THRESH_RED = 800.0
+THRESH_YELLOW = 350.0
+THRESH_GREEN = 50.0
+
+# Initialize Hardware
+red, yellow, green = LED(17), LED(27), LED(22)
 leds = [red, yellow, green]
 
-# Setup Serial Communication
-# Usually /dev/ttyACM0 for USB radar sensors on Pi
-SERIAL_PORT = '/dev/ttyACM0' 
-BAUD_RATE = 115200
-
-def update_leds(distance):
-    # Reset
+def update_physical_leds(magnitude):
+    # Updates LED states based on magnitude
+    # Turning all off to ensure clean state
     for led in leds:
         led.off()
 
-    # Threshold Logic 
-    if distance <= 25.0:
-        yellow.on()   # Caution Zone
-    if distance <= 10.0:
-        red.on()      # Danger/Stop Zone
-    else: 
-        green.on()    # Nothing is detected
-    
-    print(f"Current Distance: {distance}")
+    if magnitude > THRESH_RED:
+        red.on()
+        return "DANGER: Object Close"
+    elif magnitude > THRESH_YELLOW:
+        yellow.on()
+        return "WARNING: Object Nearby"
+    elif magnitude > THRESH_GREEN:
+        green.on()
+        return "DETECTED: Object Far"
+    else:
+        return "CLEAR"
 
-# Main Execution
-try:
-    # Initialize Serial connection
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    print(f"From Radar Sensor on {SERIAL_PORT}...")
+def main():
+    try:
+        # Initialize Serial
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        
+        # SENSOR INIT: Send API commands to ensure JSON + Magnitude
+        ser.write(b'OJ\n')  # Enable JSON
+        ser.write(b'OM\n')  # Enable Magnitude
+        time.sleep(1)       # Give sensor a moment to process
+        
+        while True:
+                    if ser.in_waiting > 0: # Checks for new data
+                        raw_line = ser.readline().decode('utf-8', errors='ignore').strip() # Grabs line of data from sensor
+                        
+                        if '{' in raw_line and '}' in raw_line: # Ensures JSON format
+                            try:
+                                start = raw_line.find('{')
+                                end = raw_line.rfind('}') + 1
+                                data = json.loads(raw_line[start:end])  # JSON string to Python dictionary
+                                
+                                mag = float(data.get("magnitude", 0))   # Collects magnitude data
+                                status = update_physical_leds(mag)      # Updates LED indicator based on mag value
+                                
+                                # Only prints the essential status line
+                                print(f"Mag: {mag:7.2f} | Status: {status}")
+                                
+                            except (json.JSONDecodeError, ValueError):  # Data Filter, in case of "bad" data
+                                continue
 
-    while True:
-        if ser.in_waiting > 0:
-            # Read a line of data from the sensor
-            line = ser.readline().decode('utf-8').strip()
-            
-            try:
-                # Parse JSON data (Standard OPS242 format)
-                data = json.loads(line)
-                
-                # Extract distance 
-                if 'dist' in data:
-                    current_dist = float(data['dist'])
-                    update_leds(current_dist)
-                    
-            except (json.JSONDecodeError, ValueError):
-                # Skip lines that aren't valid JSON (like startup headers)
-                continue
+    except Exception as e:
+        print(f"System Error: {e}")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for led in leds: led.off()
+        if 'ser' in locals(): ser.close()
 
-except KeyboardInterrupt:
-    print("\nStopping...")
-finally:
-    for led in leds: led.off()
-    if 'ser' in locals(): ser.close()
+if __name__ == "__main__":
+    main()
