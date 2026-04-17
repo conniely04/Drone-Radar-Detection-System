@@ -1,6 +1,9 @@
 Flask==2.3.3
 Flask-CORS==4.0.0
-opencv-python==4.8.1.78
+# opencv-python removed to use system-provided OpenCV (python3-opencv)
+# On Debian/Ubuntu: `sudo apt install python3-opencv`
 pyserial==3.5
-numpy==1.24.3
-Pillow==10.0.1
+# numpy pinned here originally to 1.24.3 — removed to use system-installed numpy
+# If you need a specific numpy version, reinstall with an appropriate wheel for your Python.
+# Pillow pinned here originally; using system `python3-pil` instead to avoid
+# build issues on this Python version. Install via apt if missing.
