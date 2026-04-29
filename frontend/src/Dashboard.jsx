@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from "react";
 import CameraFeed from "./components/CameraFeed";
 import ObjectDetectionLog from "./components/ObjectDetectionLog";
+import { backendUrl } from "./apiConfig";
 import "./Dashboard.css";
 
 const Dashboard = () => {
   const [backendStatus, setBackendStatus] = useState(null);
-  const [backendUrl] = useState("http://localhost:5001");
   const [connectionError, setConnectionError] = useState(null);
-  const [rawSensorData, setRawSensorData] = useState([]);
   const [availablePorts, setAvailablePorts] = useState([]);
   const [selectedPort, setSelectedPort] = useState("");
-  const [showRawData, setShowRawData] = useState(true);
 
   // Check backend connection on mount
   useEffect(() => {
@@ -40,7 +38,7 @@ const Dashboard = () => {
   const fetchAvailablePorts = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5001/api/system/available-ports",
+        `${backendUrl}/api/system/available-ports`,
       );
       const data = await response.json();
       setAvailablePorts(data.ports || []);
@@ -95,7 +93,9 @@ const Dashboard = () => {
               ✅{" "}
               {backendStatus.sensor_connected
                 ? "Serial port connected successfully"
-                : "Data is being detected!"}
+                : backendStatus.camera_available
+                  ? "Camera stream is online"
+                  : "Backend is online"}
             </div>
           ) : (
             <div className="status-loading">
@@ -104,8 +104,8 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Serial Port Selection */}
-        {backendStatus && (
+        {/* Serial Port Selection hidden: backend auto-connects to the radar serial port. */}
+        {false && backendStatus && (
           <div className="serial-port-selector">
             <h3>Serial Port Configuration</h3>
             <div className="port-controls">

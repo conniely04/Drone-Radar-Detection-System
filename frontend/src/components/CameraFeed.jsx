@@ -1,213 +1,137 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { backendUrl } from "../apiConfig";
 import "./CameraFeed.css";
 
 const CameraFeed = () => {
-  const [isConnected, setIsConnected] = useState(false);
   const [systemStatus, setSystemStatus] = useState(null);
-  const [backendUrl] = useState("http://localhost:5001");
-  const [droneDetected, setDroneDetected] = useState(false);
-  const [droneDetectionRunning, setDroneDetectionRunning] = useState(false);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const canvasRef = useRef(null);
-  const detectionIntervalRef = useRef(null);
+  const [streamOnline, setStreamOnline] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [streamError, setStreamError] = useState(null);
+  const autoStartAttemptedRef = useRef(false);
 
-  // Placeholder for when camera is not connected
-  const placeholderImage =
-    "data:image/svg+xml,%3Csvg width='640' height='480' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' font-size='20' fill='white' text-anchor='middle' dy='.3em'%3EMac Laptop Camera Feed%3C/text%3E%3C/svg%3E";
+  const streamUrl = useMemo(
+    () => `${backendUrl}/api/camera/stream?ts=${Date.now()}`,
+    [streamOnline],
+  );
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // Check system status on component mount
   useEffect(() => {
     checkSystemStatus();
+    const interval = setInterval(checkSystemStatus, 3000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Start drone detection when camera connects
   useEffect(() => {
-    if (isConnected && !droneDetectionRunning) {
-      startDroneDetection();
-    } else if (!isConnected && droneDetectionRunning) {
-      stopDroneDetection();
+    if (
+      systemStatus?.is_running &&
+      !systemStatus.camera_connected &&
+      !isStarting &&
+      !autoStartAttemptedRef.current
+    ) {
+      autoStartAttemptedRef.current = true;
+      startBackendSystem();
     }
-  }, [isConnected]);
+  }, [systemStatus, isStarting]);
 
   const checkSystemStatus = async () => {
     try {
       const response = await fetch(`${backendUrl}/api/system/status`);
       const status = await response.json();
       setSystemStatus(status);
+      setStreamOnline(Boolean(status.camera_connected));
     } catch (error) {
       console.error("Failed to check system status:", error);
+      setSystemStatus(null);
+      setStreamOnline(false);
     }
   };
 
-  const handleConnect = async () => {
+  const startBackendSystem = async () => {
+    setIsStarting(true);
+    setStreamError(null);
+
     try {
-      // Request access to camera
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
+      const response = await fetch(`${backendUrl}/api/camera/start`, {
+        method: "POST",
       });
-
-      console.log("Camera stream obtained:", stream);
-      streamRef.current = stream;
-
-      // Set the video element to display the stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        console.log("Stream attached to video element");
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Backend could not start the camera");
       }
-
-      setIsConnected(true);
       await checkSystemStatus();
     } catch (error) {
-      console.error("Failed to access camera:", error);
-      alert("Failed to access camera. Please check permissions and try again.");
+      console.error("Camera start error:", error);
+      setStreamError(error.message);
+    } finally {
+      setIsStarting(false);
     }
   };
 
-  const startDroneDetection = () => {
-    setDroneDetectionRunning(true);
-
-    // Run drone detection every 2 seconds
-    detectionIntervalRef.current = setInterval(async () => {
-      if (
-        videoRef.current &&
-        videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
-      ) {
-        const imageBase64 = captureFrameAsBase64();
-        if (imageBase64) {
-          try {
-            const response = await fetch(
-              `${backendUrl}/api/vision/detect-drone`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ image: imageBase64 }),
-              },
-            );
-
-            const result = await response.json();
-            setDroneDetected(result.drone_detected);
-
-            if (result.drone_detected) {
-              console.log("🚁 Drone detected!", result);
-            }
-          } catch (error) {
-            console.error("Drone detection error:", error);
-          }
-        }
-      }
-    }, 2000);
-  };
-
-  const stopDroneDetection = () => {
-    setDroneDetectionRunning(false);
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
-    }
-    setDroneDetected(false);
-  };
-
-  const captureFrameAsBase64 = () => {
+  const stopBackendSystem = async () => {
+    setStreamError(null);
     try {
-      if (!canvasRef.current || !videoRef.current) return null;
-
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      const video = videoRef.current;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      ctx.drawImage(video, 0, 0);
-      return canvas.toDataURL("image/jpeg").split(",")[1]; // Remove data URL prefix
+      await fetch(`${backendUrl}/api/camera/stop`, { method: "POST" });
+      await checkSystemStatus();
     } catch (error) {
-      console.error("Frame capture error:", error);
-      return null;
+      console.error("Camera stop error:", error);
+      setStreamError(error.message);
     }
   };
 
-  const handleDisconnect = () => {
-    // Stop the camera stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
-    setIsConnected(false);
-  };
+  const vision = systemStatus?.vision;
+  const droneDetected = Boolean(vision?.drone_detected);
 
   return (
     <div className="camera-feed-container">
       <div className="camera-header">
-        <h3>Mac Laptop Camera Feed</h3>
+        <h3>Raspberry Pi Camera Feed</h3>
         <div className="connection-controls">
           <button
-            onClick={isConnected ? handleDisconnect : handleConnect}
-            className={`connect-btn ${isConnected ? "connected" : ""}`}
+            onClick={streamOnline ? stopBackendSystem : startBackendSystem}
+            className={`connect-btn ${streamOnline ? "connected" : ""}`}
+            disabled={isStarting}
           >
-            {isConnected ? "Disconnect Camera" : "Connect Camera"}
+            {streamOnline
+              ? "Stop Camera"
+              : isStarting
+                ? "Starting..."
+                : "Start Camera"}
           </button>
         </div>
       </div>
 
       <div className="camera-display">
-        {isConnected ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
+        {streamOnline ? (
+          <img
+            src={streamUrl}
+            alt="Live Raspberry Pi camera stream"
             className="camera-stream"
+            onError={() => setStreamError("Camera stream is unavailable")}
+            onLoad={() => setStreamError(null)}
           />
         ) : (
-          <img
-            src={placeholderImage}
-            alt="Camera Placeholder"
-            className="camera-placeholder"
-          />
+          <div className="camera-placeholder">
+            <span>Camera stream offline</span>
+          </div>
         )}
-        {/* Hidden canvas for frame capture */}
-        <canvas ref={canvasRef} style={{ display: "none" }} />
 
-        {/* Drone detection indicator */}
-        {droneDetected && <div className="drone-alert">🚁 DRONE DETECTED</div>}
+        {droneDetected && <div className="drone-alert">DRONE DETECTED</div>}
       </div>
 
       <div className="camera-status">
         <div className="status-info">
           <span
-            className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}
+            className={`status-indicator ${streamOnline ? "connected" : "disconnected"}`}
           >
-            {isConnected ? "● Live" : "● Disconnected"}
+            {streamOnline ? "Live" : "Disconnected"}
           </span>
+          {streamError && <small className="stream-error">{streamError}</small>}
           {systemStatus && (
             <div className="system-info">
               <small>
-                Camera:{" "}
-                {isConnected || systemStatus.camera_connected ? "✅" : "❌"} |
-                Sensor: {systemStatus.sensor_connected ? "✅" : "❌"} |
-                Detections: {systemStatus.total_detections}
+                Camera: {systemStatus.camera_connected ? "online" : "offline"} |
+                Sensor: {systemStatus.sensor_connected ? "online" : "offline"} |
+                Detections: {systemStatus.total_detections} | Vision boxes:{" "}
+                {vision?.count || 0}
               </small>
             </div>
           )}

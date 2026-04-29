@@ -5,6 +5,9 @@
 
 echo "🚀 Setting up Object Detection Backend on Raspberry Pi..."
 
+BACKEND_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$BACKEND_DIR" || exit 1
+
 # Update system packages
 echo "📦 Updating system packages..."
 sudo apt update && sudo apt upgrade -y
@@ -13,11 +16,19 @@ sudo apt update && sudo apt upgrade -y
 echo "🐍 Installing Python dependencies..."
 sudo apt install -y python3-pip python3-venv python3-dev
 
+# Install frontend runtime
+echo "🌐 Installing Node.js and npm for the React frontend..."
+sudo apt install -y nodejs npm
+
 # Install system dependencies for OpenCV
 echo "📷 Installing OpenCV system dependencies..."
 sudo apt install -y libopencv-dev python3-opencv
 sudo apt install -y libatlas-base-dev libhdf5-dev libhdf5-serial-dev
 sudo apt install -y libqtgui4 libqt4-test
+
+# Install Pi-friendly PyTorch packages for YOLO inference.
+echo "🧠 Installing PyTorch for computer vision..."
+sudo apt install -y python3-torch python3-torchvision
 
 # Install camera dependencies (for Pi Camera)
 echo "📹 Installing camera dependencies..."
@@ -29,16 +40,14 @@ sudo apt install -y python3-serial
 
 # Create virtual environment
 echo "🔧 Creating Python virtual environment..."
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv --system-site-packages
+source .venv/bin/activate
 
 # Install Python packages
 echo "📦 Installing Python packages..."
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Additional Raspberry Pi specific packages
-pip install picamera2
+pip install ultralytics --no-deps
 
 # Enable camera interface
 echo "📷 Enabling camera interface..."
@@ -58,9 +67,9 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/object-detection-backend
-Environment=PATH=/home/pi/object-detection-backend/venv/bin
-ExecStart=/home/pi/object-detection-backend/venv/bin/python app.py
+WorkingDirectory=$BACKEND_DIR
+Environment=PATH=$BACKEND_DIR/.venv/bin
+ExecStart=$BACKEND_DIR/.venv/bin/python app.py
 Restart=always
 
 [Install]
@@ -74,7 +83,7 @@ echo "✅ Setup complete!"
 echo ""
 echo "🔧 Next steps:"
 echo "1. Reboot your Raspberry Pi: sudo reboot"
-echo "2. Activate virtual environment: source venv/bin/activate"
+echo "2. Activate virtual environment: source .venv/bin/activate"
 echo "3. Run the backend: python app.py"
 echo "4. Or enable auto-start: sudo systemctl enable object-detection.service"
 echo ""

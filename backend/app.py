@@ -10,10 +10,13 @@ import serial.tools.list_ports
 import queue
 import logging
 from collections import deque
+import os
 import sys
 
 # Import vision detection module
-from vision import detect_drone_in_frame
+from video_source import read_frame, start_video, stop_video
+from vision import VisionProcessor, detect_drone_in_frame
+from detector import get_detector_status
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -30,11 +33,15 @@ class ObjectDetectionSystem:
         self.is_running = False
         self.data_queue = queue.Queue()
         self.raw_sensor_data = deque(maxlen=1000)  # Store raw serial data
+        self.camera_lock = threading.Lock()
+        self.sensor_thread = None
         
         # Camera settings
         self.camera_width = 640
         self.camera_height = 480
         self.camera_fps = 30
+        self.camera_device = 0
+        self.vision_processor = VisionProcessor()
         
         # Serial settings for radar sensor
         self.serial_port = None
@@ -42,25 +49,74 @@ class ObjectDetectionSystem:
         
     def initialize_camera(self):
         """Initialize the camera (Pi Camera or USB camera)"""
-        try:
-            # Try to initialize camera (0 for first camera, usually Pi camera)
-            self.camera = cv2.VideoCapture(0)
-            
-            if not self.camera.isOpened():
-                logger.error("Failed to open camera")
-                return False
+        with self.camera_lock:
+            if self.camera:
+                return True
+
+            try:
+                self.camera = start_video(
+                    self.camera_device,
+                    width=self.camera_width,
+                    height=self.camera_height,
+                    fps=self.camera_fps,
+                )
                 
-            # Set camera properties
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
-            self.camera.set(cv2.CAP_PROP_FPS, self.camera_fps)
-            
-            logger.info("Camera initialized successfully")
+                if not self.camera:
+                    logger.error("Failed to open camera")
+                    return False
+
+                ret, frame = read_frame(self.camera)
+                if not ret or frame is None:
+                    logger.error("Camera opened but did not return a test frame")
+                    stop_video(self.camera)
+                    self.camera = None
+                    return False
+                
+                logger.info("Camera initialized successfully")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Camera initialization error: {e}")
+                self.camera = None
+                return False
+
+    def start_camera(self):
+        """Start the camera while keeping the backend system marked as running."""
+        self.is_running = True
+        if self.initialize_camera():
+            logger.info("Camera system started")
             return True
-            
-        except Exception as e:
-            logger.error(f"Camera initialization error: {e}")
-            return False
+        return False
+
+    def stop_camera(self):
+        """Stop only the camera and leave the rest of the backend running."""
+        with self.camera_lock:
+            if self.camera:
+                stop_video(self.camera)
+                self.camera = None
+
+        self.vision_processor.latest = {
+            "detections": [],
+            "drone_detected": False,
+            "count": 0,
+            "timestamp": None,
+        }
+        logger.info("Camera system stopped")
+
+    def retry_camera_start(self, attempts=5, delay_seconds=2.0):
+        """Retry camera startup in the background for Pi boot timing races."""
+        def _retry():
+            for attempt in range(1, attempts + 1):
+                if self.camera or not self.is_running:
+                    return
+                logger.info("Retrying camera startup (%s/%s)", attempt, attempts)
+                if self.start_camera():
+                    return
+                time.sleep(delay_seconds)
+
+        retry_thread = threading.Thread(target=_retry)
+        retry_thread.daemon = True
+        retry_thread.start()
     
     def initialize_serial(self, port=None):
         """Initialize serial connection for radar sensor"""
@@ -118,14 +174,11 @@ class ObjectDetectionSystem:
         """Generate camera frames for MJPEG streaming"""
         while self.is_running and self.camera:
             try:
-                ret, frame = self.camera.read()
+                ret, frame = read_frame(self.camera)
                 if not ret:
                     break
-                
-                # Add timestamp overlay
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cv2.putText(frame, timestamp, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+                frame, _vision_events = self.vision_processor.process_frame(frame)
                 
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, 
@@ -138,6 +191,8 @@ class ObjectDetectionSystem:
             except Exception as e:
                 logger.error(f"Frame generation error: {e}")
                 break
+
+            time.sleep(1.0 / max(self.camera_fps, 1))
     
     def read_sensor_data(self):
         """Read data from radar sensor via serial"""
@@ -253,6 +308,13 @@ class ObjectDetectionSystem:
                             except:
                                 pass
 
+            if not data:
+                try:
+                    data['speed'] = float(s)
+                    data['unit'] = 'mps'
+                except ValueError:
+                    pass
+
             # Normalize: require at least a speed and time or speed alone
             if 'speed' in data:
                 # default unit
@@ -315,22 +377,34 @@ class ObjectDetectionSystem:
         self.detection_data.appendleft(detection_data)
         logger.info(f"New detection: Speed {detection_data.get('speed')} {detection_data.get('unit')}, "
                    f"Computed distance {detection_data.get('computed_distance')}{detection_data.get('computed_distance_unit')}")
+
+    def add_vision_detection(self, detection_data):
+        """Add a confirmed computer-vision drone detection to the shared detection store."""
+        detection_data['id'] = int(time.time() * 1000)
+        self.detection_data.appendleft(detection_data)
+        logger.info(
+            "Vision detection: track_id=%s speed=%.2f %s bbox=%s",
+            detection_data.get('track_id'),
+            detection_data.get('speed') or 0,
+            detection_data.get('unit'),
+            detection_data.get('bbox'),
+        )
     
     def start_system(self):
         """Start the detection system"""
         self.is_running = True
         
         # Start camera
-        if self.initialize_camera():
-            logger.info("Camera system started")
+        if not self.start_camera():
+            self.retry_camera_start()
         
         # Start serial communication
-        if self.initialize_serial():
-            # Start sensor reading thread
-            sensor_thread = threading.Thread(target=self.read_sensor_data)
-            sensor_thread.daemon = True
-            sensor_thread.start()
-            logger.info("Sensor system started")
+        if self.serial_connection or self.initialize_serial():
+            if not self.sensor_thread or not self.sensor_thread.is_alive():
+                self.sensor_thread = threading.Thread(target=self.read_sensor_data)
+                self.sensor_thread.daemon = True
+                self.sensor_thread.start()
+                logger.info("Sensor system started")
 
     def run_init_sequence(self):
         """Send initialization command sequence to the serial device and collect immediate responses"""
@@ -385,13 +459,12 @@ class ObjectDetectionSystem:
         """Stop the detection system"""
         self.is_running = False
         
-        if self.camera:
-            self.camera.release()
-            self.camera = None
+        self.stop_camera()
             
         if self.serial_connection:
             self.serial_connection.close()
             self.serial_connection = None
+        self.sensor_thread = None
             
         logger.info("Detection system stopped")
 
@@ -413,12 +486,33 @@ def index():
 def camera_stream():
     """MJPEG camera stream endpoint"""
     if not detection_system.camera:
-        return "Camera not available", 404
+        detection_system.start_camera()
+    if not detection_system.camera:
+        return "Camera not available", 503
     
     return Response(
         detection_system.generate_camera_frames(),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
+@app.route('/api/camera/start', methods=['POST'])
+def start_camera():
+    """Start only the camera stream without changing the radar serial connection."""
+    try:
+        if detection_system.start_camera():
+            return jsonify({'message': 'Camera started successfully'})
+        return jsonify({'error': 'Camera not available'}), 503
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/camera/stop', methods=['POST'])
+def stop_camera():
+    """Stop only the camera stream and leave radar serial connection alone."""
+    try:
+        detection_system.stop_camera()
+        return jsonify({'message': 'Camera stopped successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/detections')
 def get_detections():
@@ -441,12 +535,15 @@ def get_latest_detection():
 @app.route('/api/system/status')
 def system_status():
     """Get system status"""
+    latest_vision = detection_system.vision_processor.latest
     return jsonify({
         'is_running': detection_system.is_running,
         'camera_connected': detection_system.camera is not None,
         'sensor_connected': detection_system.serial_connection is not None,
         'serial_port': detection_system.serial_port,
         'total_detections': len(detection_system.detection_data),
+        'vision': latest_vision,
+        'detector': get_detector_status(),
         'timestamp': datetime.now().isoformat()
     })
 
@@ -580,9 +677,10 @@ def detect_drone():
         result = detect_drone_in_frame(image_base64)
         
         return jsonify({
-            'detections': result['detections'],
-            'drone_detected': result['drone_detected'],
-            'count': result['count'],
+            'detections': result.get('detections', []),
+            'drone_detected': result.get('drone_detected', False),
+            'count': result.get('count', 0),
+            'error': result.get('error'),
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
@@ -595,7 +693,9 @@ if __name__ == '__main__':
     
     try:
         # Run Flask app
-        app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
+        debug = os.environ.get('DEBUG', 'False').lower() == 'true'
+        port = int(os.environ.get('PORT', 5001))
+        app.run(host='0.0.0.0', port=port, debug=debug, threaded=True, use_reloader=False)
     finally:
         # Clean up on exit
         detection_system.stop_system()

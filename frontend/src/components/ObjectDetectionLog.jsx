@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
+import { backendUrl } from "../apiConfig";
 import "./ObjectDetectionLog.css";
 
 const ObjectDetectionLog = () => {
   const [detectionData, setDetectionData] = useState([]);
   const [latestDetection, setLatestDetection] = useState(null);
-  const [backendUrl] = useState("http://localhost:5001");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -16,7 +16,7 @@ const ObjectDetectionLog = () => {
       const response = await fetch(`${backendUrl}/api/detections`);
 
       if (!response.ok) {
-        throw new Error("Failed to fetch detections");
+        throw new Error(`Backend returned ${response.status}`);
       }
 
       const data = await response.json();
@@ -24,7 +24,7 @@ const ObjectDetectionLog = () => {
       setLatestDetection(data.latest);
     } catch (err) {
       console.error("Error fetching detections:", err);
-      setError(err.message);
+      setError(`Cannot load detections from ${backendUrl}. Make sure the backend is running.`);
     } finally {
       setIsLoading(false);
     }
@@ -51,6 +51,30 @@ const ObjectDetectionLog = () => {
     } catch {
       return timestamp;
     }
+  };
+
+  const formatSpeed = (detection) => {
+    const speed = Number(detection?.speed);
+    return Number.isFinite(speed) ? Math.abs(speed).toFixed(2) : "—";
+  };
+
+  const formatDistance = (detection) => {
+    if (detection?.computed_distance != null) {
+      return `${Number(detection.computed_distance).toFixed(2)} ${
+        detection.computed_distance_unit || detection.unit || ""
+      }`;
+    }
+    if (detection?.distance != null) {
+      return detection.distance;
+    }
+    return "—";
+  };
+
+  const formatDirection = (detection) => {
+    const speed = Number(detection?.speed);
+    if (speed < 0) return "Inbound";
+    if (speed > 0) return "Outbound";
+    return "—";
   };
 
   return (
@@ -89,19 +113,11 @@ const ObjectDetectionLog = () => {
           <div className="detection-details">
             <div className="detail-item">
               <span className="label">Captured Speed:</span>
-              <span className="value speed">
-                {Math.abs(Number(latestDetection.speed)).toFixed(2)}
-              </span>
+              <span className="value speed">{formatSpeed(latestDetection)}</span>
             </div>
             <div className="detail-item">
               <span className="label">Position:</span>
-              <span className="value">
-                {latestDetection.computed_distance != null
-                  ? `${latestDetection.computed_distance.toFixed(2)} ${latestDetection.computed_distance_unit || latestDetection.unit}`
-                  : latestDetection.distance != null
-                    ? `${latestDetection.distance}`
-                    : "—"}
-              </span>
+              <span className="value">{formatDistance(latestDetection)}</span>
             </div>
             <div className="detail-item">
               <span className="label">Timestamp:</span>
@@ -116,11 +132,7 @@ const ObjectDetectionLog = () => {
             <div className="detail-item">
               <span className="label">Direction:</span>
               <span className="value direction">
-                {Number(latestDetection.speed) < 0
-                  ? "Inbound"
-                  : Number(latestDetection.speed) > 0
-                    ? "Outbound"
-                    : "—"}
+                {formatDirection(latestDetection)}
               </span>
             </div>
           </div>
@@ -143,25 +155,14 @@ const ObjectDetectionLog = () => {
           ) : (
             <div className="history-rows">
               {detectionData.slice().map((detection) => {
-                const speedNum = Number(detection.speed) || 0;
-                const direction =
-                  speedNum < 0 ? "Inbound" : speedNum > 0 ? "Outbound" : "—";
                 return (
                   <div key={detection.id} className="history-row">
                     <span className="time">
                       {formatTimestamp(detection.timestamp)}
                     </span>
-                    <span className="speed">
-                      {Math.abs(Number(detection.speed)).toFixed(2)}
-                    </span>
-                    <span className="distance">
-                      {detection.computed_distance != null
-                        ? `${detection.computed_distance.toFixed(2)} ${detection.computed_distance_unit || detection.unit || ""}`
-                        : detection.distance != null
-                          ? detection.distance
-                          : "—"}
-                    </span>
-                    <span className="direction">{direction}</span>
+                    <span className="speed">{formatSpeed(detection)}</span>
+                    <span className="distance">{formatDistance(detection)}</span>
+                    <span className="direction">{formatDirection(detection)}</span>
                     <span className="unit">{detection.unit || "—"}</span>
                   </div>
                 );
