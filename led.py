@@ -52,7 +52,7 @@ def main():
                                 
                                 if "range" in data:
                                     range_val = float(data["range"])
-                                update_physical_leds(range_val)
+                                    update_physical_leds(range_val)
                         
                         except (json.JSONDecodeError, ValueError):
                             continue
