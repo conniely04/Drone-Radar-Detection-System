@@ -179,7 +179,9 @@ class ObjectDetectionSystem:
                 if not ret:
                     break
 
-                frame, _vision_events = self.vision_processor.process_frame(frame)
+                frame, vision_events = self.vision_processor.process_frame(frame)
+                for event in vision_events:
+                    self.add_vision_detection(event)
                 
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, 

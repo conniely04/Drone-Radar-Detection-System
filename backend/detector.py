@@ -12,8 +12,6 @@ import logging
 import os
 from pathlib import Path
 
-import cv2
-
 logger = logging.getLogger(__name__)
 
 _model = None
@@ -21,6 +19,7 @@ _model_error = None
 _last_raw_count = 0
 _last_kept_count = 0
 _last_rejections = []
+_last_predictions = []
 
 
 def _default_model_path():
@@ -58,13 +57,43 @@ def get_detector_status():
         "model_loaded": _model is not None,
         "model_error": str(_model_error) if _model_error else None,
         "model_path": str(Path(os.environ.get("DRONE_MODEL_PATH", _default_model_path()))),
+        "model_names": getattr(_model, "names", None) if _model is not None else None,
         "last_raw_count": _last_raw_count,
         "last_kept_count": _last_kept_count,
         "last_rejections": _last_rejections,
+        "last_predictions": _last_predictions,
     }
 
 
-def detect(frame, conf_threshold=0.30, min_size=8, max_size_ratio=1.0):
+def _drone_class_ids(model):
+    """Return class IDs that look like drone classes, or None for one-class models."""
+    names = getattr(model, "names", None)
+    if not names:
+        return None
+
+    if isinstance(names, dict):
+        items = names.items()
+    else:
+        items = enumerate(names)
+
+    matching_ids = {
+        int(class_id)
+        for class_id, name in items
+        if "drone" in str(name).lower() or "uav" in str(name).lower()
+    }
+    return matching_ids or None
+
+
+def _class_name(model, class_id):
+    names = getattr(model, "names", {})
+    if isinstance(names, dict):
+        return names.get(class_id, str(class_id))
+    if isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
+        return names[class_id]
+    return str(class_id)
+
+
+def detect(frame, conf_threshold=None, min_size=8, max_size_ratio=1.0):
     """
     Input:
         frame = one image from the video stream (OpenCV BGR image)
@@ -72,10 +101,11 @@ def detect(frame, conf_threshold=0.30, min_size=8, max_size_ratio=1.0):
     Output:
         boxes = list of bounding boxes (x, y, w, h)
     """
-    global _last_raw_count, _last_kept_count, _last_rejections
+    global _last_raw_count, _last_kept_count, _last_rejections, _last_predictions
 
     boxes = []
     _last_rejections = []
+    _last_predictions = []
     model = _get_model()
     if model is None:
         _last_raw_count = 0
@@ -83,23 +113,32 @@ def detect(frame, conf_threshold=0.30, min_size=8, max_size_ratio=1.0):
         _last_rejections = ["model unavailable"]
         return boxes
 
-    frame_h, frame_w = frame.shape[:2]
+    if conf_threshold is None:
+        conf_threshold = float(os.environ.get("DRONE_CONF_THRESHOLD", "0.15"))
 
-    # Convert BGR -> RGB because YOLO expects RGB-style input
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_h, frame_w = frame.shape[:2]
+    allowed_class_ids = _drone_class_ids(model)
 
     # Run inference
-    results = model(frame_rgb, verbose=False)
+    results = model(frame, conf=0.01, verbose=False)
 
     for result in results:
         _last_raw_count = len(result.boxes)
         for box in result.boxes:
             confidence = float(box.conf[0])
             class_id = int(box.cls[0])
+            class_name = _class_name(model, class_id)
+            _last_predictions.append(
+                {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": round(confidence, 4),
+                }
+            )
 
-            # Keep only class 0 (drone) and only confident detections
-            if class_id != 0:
-                _last_rejections.append(f"class {class_id} is not drone")
+            # Keep drone-like classes when the model has class names.
+            if allowed_class_ids is not None and class_id not in allowed_class_ids:
+                _last_rejections.append(f"class {class_id} ({class_name}) is not drone")
                 continue
             if confidence < conf_threshold:
                 _last_rejections.append(f"confidence {confidence:.2f} below {conf_threshold:.2f}")

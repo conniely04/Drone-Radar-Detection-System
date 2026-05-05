@@ -55,7 +55,7 @@ const ObjectDetectionLog = () => {
 
   const formatSpeed = (detection) => {
     const speed = Number(detection?.speed);
-    return Number.isFinite(speed) ? `${speed.toFixed(2)} m/s` : "—";
+    return Number.isFinite(speed) ? `${Math.abs(speed).toFixed(2)} m/s` : "—";
   };
 
   const formatRange = (detection) => {
@@ -64,11 +64,6 @@ const ObjectDetectionLog = () => {
       return `${range.toFixed(2)} m`;
     }
     return "—";
-  };
-
-  const formatSensorTime = (detection) => {
-    const sensorTime = Number(detection?.time);
-    return Number.isFinite(sensorTime) ? `${sensorTime.toFixed(3)} s` : "—";
   };
 
   const latestSpeedDetection =
@@ -123,12 +118,6 @@ const ObjectDetectionLog = () => {
               <span className="value">{formatRange(latestRangeDetection)}</span>
             </div>
             <div className="detail-item">
-              <span className="label">Sensor Time:</span>
-              <span className="value">
-                {formatSensorTime(latestDetection)}
-              </span>
-            </div>
-            <div className="detail-item">
               <span className="label">Received:</span>
               <span className="value">
                 {formatTimestamp(latestDetection.timestamp)}
@@ -144,7 +133,6 @@ const ObjectDetectionLog = () => {
         <div className="history-table">
           <div className="history-header">
             <span>Received</span>
-            <span>Sensor Time</span>
             <span>Speed</span>
             <span>Range</span>
           </div>
@@ -157,9 +145,6 @@ const ObjectDetectionLog = () => {
                   <div key={detection.id} className="history-row">
                     <span className="time" data-label="Received">
                       {formatTimestamp(detection.timestamp)}
-                    </span>
-                    <span className="sensor-time" data-label="Sensor Time">
-                      {formatSensorTime(detection)}
                     </span>
                     <span className="speed" data-label="Speed">
                       {formatSpeed(detection)}
