@@ -104,8 +104,7 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Serial Port Selection hidden: backend auto-connects to the radar serial port. */}
-        {false && backendStatus && (
+        {backendStatus && (
           <div className="serial-port-selector">
             <h3>Serial Port Configuration</h3>
             <div className="port-controls">
@@ -122,7 +121,7 @@ const Dashboard = () => {
                 ))}
               </select>
               <button onClick={handleConnectPort} disabled={!selectedPort}>
-                Connect
+                Connect Radar
               </button>
               <button onClick={fetchAvailablePorts}>Refresh Ports</button>
             </div>

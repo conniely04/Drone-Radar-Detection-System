@@ -9,6 +9,7 @@ import serial
 import serial.tools.list_ports
 import queue
 import logging
+import re
 from collections import deque
 import os
 import sys
@@ -228,85 +229,141 @@ class ObjectDetectionSystem:
                 logger.error(f"Sensor reading error: {e}")
                 time.sleep(1)
     
+    @staticmethod
+    def _normalize_sensor_key(key):
+        """Normalize sensor field names from JSON, CSV, or text responses."""
+        return re.sub(r'[^a-z0-9]', '', str(key).lower())
+
+    @staticmethod
+    def _coerce_sensor_number(value):
+        """Extract the first numeric value from a sensor field."""
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        match = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', str(value))
+        if match:
+            return float(match.group(0))
+        return None
+
+    def _apply_sensor_field(self, parsed, key, value):
+        """Map common radar field aliases into the frontend detection shape."""
+        normalized_key = self._normalize_sensor_key(key)
+        numeric_value = self._coerce_sensor_number(value)
+
+        speed_keys = {
+            'speed',
+            'velocity',
+            'detectedobjectvelocity',
+            'objectvelocity',
+            'radialvelocity',
+            'dopplervelocity',
+            'vel',
+        }
+        distance_keys = {
+            'distance',
+            'range',
+            'detectedobjectrange',
+            'objectrange',
+            'detectedobjectdistance',
+            'objectdistance',
+        }
+        magnitude_keys = {
+            'magnitude',
+            'mag',
+            'strength',
+            'signalstrength',
+            'power',
+            'amplitude',
+        }
+        confidence_keys = {
+            'confidence',
+            'certainty',
+            'probability',
+            'score',
+        }
+        time_keys = {
+            'time',
+            'timestamp',
+            't',
+        }
+        unit_keys = {
+            'unit',
+            'units',
+            'speedunit',
+            'velocityunit',
+        }
+        object_type_keys = {
+            'type',
+            'objecttype',
+            'detectedobjecttype',
+        }
+        angle_keys = {
+            'angle',
+            'azimuth',
+            'bearing',
+        }
+
+        if normalized_key in speed_keys and numeric_value is not None:
+            parsed['speed'] = numeric_value
+        elif normalized_key in distance_keys and numeric_value is not None:
+            parsed['distance'] = numeric_value
+        elif normalized_key in magnitude_keys and numeric_value is not None:
+            parsed['magnitude'] = numeric_value
+        elif normalized_key in confidence_keys and numeric_value is not None:
+            parsed['confidence'] = numeric_value
+        elif normalized_key in time_keys and numeric_value is not None:
+            parsed['time'] = numeric_value
+        elif normalized_key in unit_keys:
+            parsed['unit'] = str(value).strip()
+        elif normalized_key in object_type_keys:
+            parsed['object_type'] = str(value).strip()
+        elif normalized_key in angle_keys and numeric_value is not None:
+            parsed['angle'] = numeric_value
+
     def parse_sensor_data(self, data_string):
-        """Parse incoming sensor data string"""
+        """Parse incoming radar sensor data into the detection shape used by the frontend."""
         try:
-            # Try to parse either JSON-like or comma-separated key:value pairs
             data = {}
             s = data_string.strip()
-            # If it looks like JSON, try json.loads
-            if (s.startswith('{') and s.endswith('}')) or (s.startswith('{"') and s.endswith('}')):
+
+            # JSON payloads from firmware or bridge scripts.
+            if s.startswith('{') and s.endswith('}'):
                 try:
                     j = json.loads(s)
                     for k, v in j.items():
-                        key = k.strip().upper()
-                        if key == 'SPEED' or key == 'DETECTEDOBJECTVELOCITY' or key == 'VELOCITY':
-                            try:
-                                data['speed'] = float(v)
-                            except:
-                                pass
-                        elif key == 'DISTANCE':
-                            try:
-                                data['distance'] = float(v)
-                            except:
-                                pass
-                        elif key == 'MAGNITUDE':
-                            try:
-                                data['magnitude'] = float(v)
-                            except:
-                                pass
-                        elif key == 'CONFIDENCE':
-                            try:
-                                data['confidence'] = float(v)
-                            except:
-                                pass
-                        elif key == 'UNIT':
-                            data['unit'] = str(v)
-                        elif key == 'TIME':
-                            try:
-                                data['time'] = float(v)
-                            except:
-                                data['time'] = None
+                        self._apply_sensor_field(data, k, v)
                 except Exception as e:
                     logger.debug(f"JSON parsing error: {e}")
-                    # fall back to key:value parsing below
-                    pass
 
             if not data:
-                parts = data_string.split(',')
+                # Key/value payloads such as:
+                # SPEED:45,DISTANCE:30
+                # DetectedObjectVelocity=-1.2 m/s Range=140 cm
+                pairs = re.findall(
+                    r'([A-Za-z][A-Za-z0-9_\-/]*)\s*[:=]\s*'
+                    r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?|[A-Za-z][A-Za-z0-9_\-/]*)',
+                    s,
+                )
+                for key, value in pairs:
+                    self._apply_sensor_field(data, key, value)
+
+            if not data:
+                parts = re.split(r'[,;]', data_string)
                 for part in parts:
                     if ':' in part:
                         key, value = part.split(':', 1)
-                        key = key.strip().upper()
-                        value = value.strip().strip('"')
+                        self._apply_sensor_field(data, key, value.strip().strip('"'))
 
-                        if key == 'SPEED' or key == 'DETECTEDOBJECTVELOCITY' or key == 'VELOCITY':
-                            try:
-                                data['speed'] = float(value)
-                            except:
-                                pass
-                        elif key == 'DISTANCE':
-                            try:
-                                data['distance'] = float(value)
-                            except:
-                                pass
-                        elif key == 'MAGNITUDE':
-                            try:
-                                data['magnitude'] = float(value)
-                            except:
-                                pass
-                        elif key == 'CONFIDENCE':
-                            try:
-                                data['confidence'] = float(value)
-                            except:
-                                pass
-                        elif key == 'UNIT':
-                            data['unit'] = value
-                        elif key == 'TIME':
-                            try:
-                                data['time'] = float(value)
-                            except:
-                                pass
+            if not data:
+                numeric_values = [
+                    float(match)
+                    for match in re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', s)
+                ]
+                if len(numeric_values) >= 2:
+                    data['speed'] = numeric_values[0]
+                    data['distance'] = numeric_values[1]
+                    if len(numeric_values) > 2:
+                        data['confidence'] = numeric_values[2]
 
             if not data:
                 try:
@@ -315,12 +372,9 @@ class ObjectDetectionSystem:
                 except ValueError:
                     pass
 
-            # Normalize: require at least a speed and time or speed alone
             if 'speed' in data:
-                # default unit
                 if 'unit' not in data:
-                    data['unit'] = 'unknown'
-                # attach metadata
+                    data['unit'] = 'mps'
                 detection = {
                     'speed': data.get('speed'),
                     'distance': data.get('distance'),
@@ -328,7 +382,8 @@ class ObjectDetectionSystem:
                     'confidence': data.get('confidence', None),
                     'unit': data.get('unit'),
                     'time': data.get('time', None),
-                    'object_type': 'Vehicle',
+                    'angle': data.get('angle'),
+                    'object_type': data.get('object_type', 'Radar Object'),
                     'timestamp': datetime.now().isoformat()
                 }
                 return detection
@@ -479,6 +534,9 @@ def index():
         'message': 'Object Detection Backend API',
         'camera_available': detection_system.camera is not None,
         'sensor_available': detection_system.serial_connection is not None,
+        'sensor_connected': detection_system.serial_connection is not None,
+        'serial_port': detection_system.serial_port,
+        'total_detections': len(detection_system.detection_data),
         'timestamp': datetime.now().isoformat()
     })
 
@@ -612,18 +670,23 @@ def set_serial_port():
         
         logger.info(f"Attempting to connect to port: {port}")
         
-        # Stop existing connection
-        if detection_system.is_running:
-            logger.info("Stopping existing system...")
-            detection_system.stop_system()
+        # Replace only the serial connection so the camera stream stays online.
+        if detection_system.serial_connection:
+            logger.info("Closing existing serial connection...")
+            try:
+                detection_system.serial_connection.close()
+            except Exception as e:
+                logger.error(f"Error closing existing serial connection: {e}")
+            detection_system.serial_connection = None
+            detection_system.sensor_thread = None
         
         # Try to initialize with new port
         if detection_system.initialize_serial(port):
             detection_system.is_running = True
             # Start sensor reading thread
-            sensor_thread = threading.Thread(target=detection_system.read_sensor_data)
-            sensor_thread.daemon = True
-            sensor_thread.start()
+            detection_system.sensor_thread = threading.Thread(target=detection_system.read_sensor_data)
+            detection_system.sensor_thread.daemon = True
+            detection_system.sensor_thread.start()
             # Run initialization command sequence in background
             try:
                 detection_system.run_init_sequence()
