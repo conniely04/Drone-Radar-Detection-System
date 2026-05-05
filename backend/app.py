@@ -307,6 +307,7 @@ class ObjectDetectionSystem:
             parsed['speed'] = numeric_value
         elif normalized_key in distance_keys and numeric_value is not None:
             parsed['distance'] = numeric_value
+            parsed['range'] = numeric_value
         elif normalized_key in magnitude_keys and numeric_value is not None:
             parsed['magnitude'] = numeric_value
         elif normalized_key in confidence_keys and numeric_value is not None:
@@ -372,12 +373,13 @@ class ObjectDetectionSystem:
                 except ValueError:
                     pass
 
-            if 'speed' in data:
+            if 'speed' in data or 'range' in data or 'distance' in data:
                 if 'unit' not in data:
-                    data['unit'] = 'mps'
+                    data['unit'] = 'm/s' if 'speed' in data else 'm'
                 detection = {
                     'speed': data.get('speed'),
                     'distance': data.get('distance'),
+                    'range': data.get('range', data.get('distance')),
                     'magnitude': data.get('magnitude'),
                     'confidence': data.get('confidence', None),
                     'unit': data.get('unit'),
@@ -397,7 +399,7 @@ class ObjectDetectionSystem:
     
     def add_detection(self, detection_data):
         """Add new detection to the data store"""
-        detection_data['id'] = int(time.time() * 1000)  # Use timestamp as ID
+        detection_data['id'] = time.time_ns()
 
         # Compute distance/position using magnitude value if available, otherwise use velocity trapezoidal rule
         try:
@@ -408,6 +410,17 @@ class ObjectDetectionSystem:
                 detection_data['computed_distance_unit'] = 'cm'
                 logger.info(f"Using magnitude for distance: {detection_data['computed_distance']} cm")
             else:
+                if detection_data.get('range') is not None:
+                    detection_data['computed_distance'] = detection_data.get('range')
+                    detection_data['computed_distance_unit'] = 'm'
+                    logger.debug(f"Using radar range: {detection_data['computed_distance']} m")
+                    self.detection_data.appendleft(detection_data)
+                    logger.info(
+                        f"New detection: Speed {detection_data.get('speed')} m/s, "
+                        f"Range {detection_data.get('range')} m"
+                    )
+                    return
+
                 # Fall back to velocity-based distance calculation using trapezoidal rule
                 prev = self.detection_data[0] if len(self.detection_data) > 0 else None
                 if prev and detection_data.get('time') is not None and prev.get('time') is not None and detection_data.get('speed') is not None and prev.get('speed') is not None:
@@ -460,6 +473,10 @@ class ObjectDetectionSystem:
                 self.sensor_thread.daemon = True
                 self.sensor_thread.start()
                 logger.info("Sensor system started")
+                try:
+                    self.run_init_sequence()
+                except Exception as e:
+                    logger.error(f"Failed to run init sequence: {e}")
 
     def run_init_sequence(self):
         """Send initialization command sequence to the serial device and collect immediate responses"""
@@ -471,7 +488,7 @@ class ObjectDetectionSystem:
             try:
                 # initial wait
                 time.sleep(0.5)
-                cmds = ['OJ', 'IG', 'ON', 'OU', 'OS', 'SV', 'C=1771982622:', 'OM']
+                cmds = ['OJ', 'OY', 'Ou', 'OT', 'OH', 'IG', 'ON', 'OU', 'OS', 'SV', 'C=1771982622:', 'OM']
                 for cmd in cmds:
                     try:
                         to_send = (cmd + '\n').encode('utf-8')

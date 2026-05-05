@@ -140,7 +140,7 @@
 
 .history-header {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
   background: #e9ecef;
   padding: 12px 15px;
   font-weight: bold;
@@ -152,7 +152,7 @@
 
 .history-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
   padding: 12px 15px;
   border-bottom: 1px solid #e9ecef;
   transition: background-color 0.2s;
@@ -178,6 +178,15 @@
 
 .history-row .distance {
   color: #28a745;
+}
+
+.history-row .range {
+  color: #28a745;
+  font-weight: 500;
+}
+
+.history-row .sensor-time {
+  color: #495057;
 }
 
 .history-row .direction {

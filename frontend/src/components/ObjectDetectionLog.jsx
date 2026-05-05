@@ -55,27 +55,28 @@ const ObjectDetectionLog = () => {
 
   const formatSpeed = (detection) => {
     const speed = Number(detection?.speed);
-    return Number.isFinite(speed) ? Math.abs(speed).toFixed(2) : "—";
+    return Number.isFinite(speed) ? `${speed.toFixed(2)} m/s` : "—";
   };
 
-  const formatDistance = (detection) => {
-    if (detection?.computed_distance != null) {
-      return `${Number(detection.computed_distance).toFixed(2)} ${
-        detection.computed_distance_unit || detection.unit || ""
-      }`;
-    }
-    if (detection?.distance != null) {
-      return detection.distance;
+  const formatRange = (detection) => {
+    const range = Number(detection?.range ?? detection?.distance);
+    if (Number.isFinite(range)) {
+      return `${range.toFixed(2)} m`;
     }
     return "—";
   };
 
-  const formatDirection = (detection) => {
-    const speed = Number(detection?.speed);
-    if (speed < 0) return "Inbound";
-    if (speed > 0) return "Outbound";
-    return "—";
+  const formatSensorTime = (detection) => {
+    const sensorTime = Number(detection?.time);
+    return Number.isFinite(sensorTime) ? `${sensorTime.toFixed(3)} s` : "—";
   };
+
+  const latestSpeedDetection =
+    detectionData.find((detection) => detection.speed != null) || latestDetection;
+  const latestRangeDetection =
+    detectionData.find(
+      (detection) => detection.range != null || detection.distance != null,
+    ) || latestDetection;
 
   return (
     <div className="detection-log-container">
@@ -109,30 +110,28 @@ const ObjectDetectionLog = () => {
       {/* Current Detection Display */}
       {latestDetection && (
         <div className="current-detection">
-          <h4>Latest Detection</h4>
+          <h4>Latest Radar Values</h4>
           <div className="detection-details">
             <div className="detail-item">
-              <span className="label">Captured Speed:</span>
-              <span className="value speed">{formatSpeed(latestDetection)}</span>
-            </div>
-            <div className="detail-item">
-              <span className="label">Position:</span>
-              <span className="value">{formatDistance(latestDetection)}</span>
-            </div>
-            <div className="detail-item">
-              <span className="label">Timestamp:</span>
-              <span className="value">
-                {formatTimestamp(latestDetection.timestamp)}
+              <span className="label">Speed:</span>
+              <span className="value speed">
+                {formatSpeed(latestSpeedDetection)}
               </span>
             </div>
             <div className="detail-item">
-              <span className="label">Unit:</span>
-              <span className="value">{latestDetection.unit || "—"}</span>
+              <span className="label">Range:</span>
+              <span className="value">{formatRange(latestRangeDetection)}</span>
             </div>
             <div className="detail-item">
-              <span className="label">Direction:</span>
-              <span className="value direction">
-                {formatDirection(latestDetection)}
+              <span className="label">Sensor Time:</span>
+              <span className="value">
+                {formatSensorTime(latestDetection)}
+              </span>
+            </div>
+            <div className="detail-item">
+              <span className="label">Received:</span>
+              <span className="value">
+                {formatTimestamp(latestDetection.timestamp)}
               </span>
             </div>
           </div>
@@ -144,11 +143,10 @@ const ObjectDetectionLog = () => {
         <h4>Detection History ({detectionData.length} total)</h4>
         <div className="history-table">
           <div className="history-header">
-            <span>Time</span>
+            <span>Received</span>
+            <span>Sensor Time</span>
             <span>Speed</span>
-            <span>Distance</span>
-            <span>Direction</span>
-            <span>Unit</span>
+            <span>Range</span>
           </div>
           {detectionData.length === 0 && !isLoading ? (
             <div className="no-data">No detections yet...</div>
@@ -157,13 +155,18 @@ const ObjectDetectionLog = () => {
               {detectionData.slice().map((detection) => {
                 return (
                   <div key={detection.id} className="history-row">
-                    <span className="time">
+                    <span className="time" data-label="Received">
                       {formatTimestamp(detection.timestamp)}
                     </span>
-                    <span className="speed">{formatSpeed(detection)}</span>
-                    <span className="distance">{formatDistance(detection)}</span>
-                    <span className="direction">{formatDirection(detection)}</span>
-                    <span className="unit">{detection.unit || "—"}</span>
+                    <span className="sensor-time" data-label="Sensor Time">
+                      {formatSensorTime(detection)}
+                    </span>
+                    <span className="speed" data-label="Speed">
+                      {formatSpeed(detection)}
+                    </span>
+                    <span className="range" data-label="Range">
+                      {formatRange(detection)}
+                    </span>
                   </div>
                 );
               })}
