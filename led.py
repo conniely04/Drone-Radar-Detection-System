@@ -7,32 +7,28 @@ from gpiozero import LED
 SERIAL_PORT = '/dev/ttyACM0' 
 BAUD_RATE = 19200
 
-# Magnitude Thresholds (Adjust once the sensor is in the enclosure)
-THRESH_RED = 800.0
-THRESH_YELLOW = 350.0
-THRESH_GREEN = 50.0
+# Range Thresholds in METERS
+# Adjusted based on area
+THRESH_RED    = 0.5   # Object is within 0.5m (Very Close)
+THRESH_YELLOW = 1.5   # Object is within 1.5m (Caution)
+THRESH_GREEN  = 3.0   # Object is within 3.0m (Detected)
 
 # Initialize Hardware
 red, yellow, green = LED(17), LED(27), LED(22)
 leds = [red, yellow, green]
 
-def update_physical_leds(magnitude):
-    # Updates LED states based on magnitude
-    # Turning all off to ensure clean state
+def update_physical_leds(range_m):
+    # Reset all LEDs
     for led in leds:
         led.off()
 
-    if magnitude > THRESH_RED:
+    # Smaller meter value = closer proximity
+    if range_m < THRESH_RED:
         red.on()
-        return "DANGER: Object Close"
-    elif magnitude > THRESH_YELLOW:
+    elif range_m < THRESH_YELLOW:
         yellow.on()
-        return "WARNING: Object Nearby"
-    elif magnitude > THRESH_GREEN:
+    elif range_m < THRESH_GREEN:
         green.on()
-        return "DETECTED: Object Far"
-    else:
-        return "CLEAR"
 
 def main():
     try:
@@ -41,7 +37,7 @@ def main():
         
         # SENSOR INIT: Send API commands to ensure JSON + Magnitude
         ser.write(b'OJ\n')  # Enable JSON
-        ser.write(b'OM\n')  # Enable Magnitude
+        ser.write(b'OR\n')  # Enable Magnitude
         time.sleep(1)       # Give sensor a moment to process
         
         while True:
@@ -54,17 +50,15 @@ def main():
                                 end = raw_line.rfind('}') + 1
                                 data = json.loads(raw_line[start:end])  # JSON string to Python dictionary
                                 
-                                mag = float(data.get("magnitude", 0))   # Collects magnitude data
-                                status = update_physical_leds(mag)      # Updates LED indicator based on mag value
-                                
-                                # Only prints the essential status line
-                                print(f"Mag: {mag:7.2f} | Status: {status}")
-                                
-                            except (json.JSONDecodeError, ValueError):  # Data Filter, in case of "bad" data
-                                continue
+                                if "range" in data:
+                                    range_val = float(data["range"])
+                                update_physical_leds(range_val)
+                        
+                        except (json.JSONDecodeError, ValueError):
+                            continue
 
     except Exception as e:
-        print(f"System Error: {e}")
+        pass
     except KeyboardInterrupt:
         pass
     finally:
